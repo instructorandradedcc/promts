@@ -1,475 +1,423 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider,
-  signOut,
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  query, 
-  onSnapshot, 
-  serverTimestamp,
-  deleteDoc,
-  doc
-} from 'firebase/firestore';
-import { 
-  Instagram, 
-  Plus, 
-  Copy, 
-  Search, 
-  Sparkles,
-  X,
-  User,
-  LogOut,
-  Trash2,
-  Video,
-  Image as ImageIcon,
-  PlayCircle
-} from 'lucide-react';
-
-// --- CONFIGURACIÓN DE FIREBASE (NO EDITAR) ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-// --- UTILIDAD: ID DE INSTAGRAM (FOTO Y VIDEO) ---
-const getInstagramData = (url) => {
-  try {
-    // Regex mejorado para soportar /p/ (posts) y /reel/ (videos)
-    const regex = /instagram\.com\/(p|reel)\/([a-zA-Z0-9_-]+)/;
-    const match = url.match(regex);
-    if (match) {
-      return {
-        type: match[1] === 'reel' ? 'video' : 'image',
-        id: match[2]
-      };
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
-};
-
-// --- COMPONENTE PRINCIPAL ---
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [prompts, setPrompts] = useState([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-  
-  // Estados Formulario
-  const [promptText, setPromptText] = useState('');
-  const [instaUrl, setInstaUrl] = useState('');
-  const [category, setCategory] = useState('Arquitectura');
-  const [style, setStyle] = useState('Fotorealista');
-  const [artistName, setArtistName] = useState('Olme Cárdenas');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Filtros
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeCategory, setActiveCategory] = useState('Todos');
-
-  // 1. Auth
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Error login:", error);
-    }
-  };
-
-  const handleLogout = () => signOut(auth);
-
-  // 2. Cargar Datos
-  useEffect(() => {
-    const q = query(
-      collection(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedPrompts = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      loadedPrompts.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setPrompts(loadedPrompts);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // 3. Publicar
-  const handlePublish = async (e) => {
-    e.preventDefault();
-    if (!promptText || !instaUrl || !user) return;
-
-    const instaData = getInstagramData(instaUrl);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PromptVerse - Video & Image Hub</title>
     
-    if (!instaData) {
-      alert("Enlace no válido. Debe ser un link de Instagram (Post o Reel).");
-      return;
-    }
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM (Versiones UMD estables) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel para procesar JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    setIsSubmitting(true);
-
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2'), {
-        text: promptText,
-        instagramId: instaData.id,
-        mediaType: instaData.type, // 'video' o 'image'
-        originalUrl: instaUrl,
-        category,
-        style,
-        artist: artistName || user.displayName || 'Anónimo',
-        authorUid: user.uid,
-        createdAt: serverTimestamp(),
-      });
-
-      setPromptText('');
-      setInstaUrl('');
-      setIsModalOpen(false);
-    } catch (error) {
-      console.error("Error publicando:", error);
-      alert("Error al publicar.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // 4. Borrar
-  const handleDelete = async (docId) => {
-    if (!confirm("¿Borrar este prompt?")) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2', docId));
-    } catch (error) {
-      console.error("Error borrando:", error);
-    }
-  };
-
-  // Filtros
-  const filteredPrompts = prompts.filter(p => {
-    const matchesSearch = p.text.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.style.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          p.artist.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = activeCategory === 'Todos' || p.category === activeCategory;
-    return matchesSearch && matchesCategory;
-  });
-
-  const categories = ['Todos', 'Arquitectura', 'Video/Reel', 'Interiorismo', 'Paisajismo', 'Animación 3D'];
-
-  const copyToClipboard = (text, id) => {
-    navigator.clipboard.writeText(text);
-    const btn = document.getElementById(`copy-btn-${id}`);
-    if (btn) {
-      const originalText = btn.innerHTML;
-      btn.innerHTML = `<span class="flex items-center gap-1">¡Copiado!</span>`;
-      btn.classList.add('bg-green-500', 'text-white');
-      setTimeout(() => {
-        btn.innerHTML = originalText;
-        btn.classList.remove('bg-green-500', 'text-white');
-      }, 2000);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#fafaf9] text-stone-800 font-sans selection:bg-amber-200 selection:text-amber-900">
-      
-      {/* HEADER */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-stone-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-tr from-purple-500 to-orange-500 p-2.5 rounded-xl text-white shadow-lg shadow-purple-500/20 animate-pulse-slow">
-              <Sparkles size={22} strokeWidth={2.5} />
-            </div>
-            <div className="flex flex-col">
-              <h1 className="text-xl md:text-2xl font-black text-stone-900 leading-none">PromptVerse</h1>
-              <span className="text-[10px] md:text-xs font-bold text-amber-600 tracking-widest uppercase mt-0.5">
-                Video & Image Hub
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => setIsModalOpen(true)}
-                  className="hidden md:flex items-center gap-2 bg-stone-900 hover:bg-stone-800 text-white px-5 py-2.5 rounded-full font-bold text-sm transition-all transform hover:scale-105 shadow-xl"
-                >
-                  <Plus size={18} />
-                  <span>Subir Post/Reel</span>
-                </button>
-                <button onClick={() => setIsModalOpen(true)} className="md:hidden w-10 h-10 bg-stone-900 text-white rounded-full flex items-center justify-center shadow-lg"><Plus size={20}/></button>
-
-                <div className="relative group">
-                  <img 
-                    src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
-                    alt="User" 
-                    className="w-10 h-10 rounded-full border-2 border-stone-200 cursor-pointer hover:border-amber-500 transition-colors"
-                  />
-                  <div className="absolute right-0 top-12 w-48 bg-white rounded-xl shadow-xl border border-stone-100 p-2 hidden group-hover:block animate-in fade-in zoom-in-95">
-                    <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 font-bold">
-                      <LogOut size={14} /> Salir
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <button 
-                onClick={handleLogin}
-                className="flex items-center gap-2 bg-white border-2 border-stone-200 hover:border-stone-900 text-stone-700 hover:text-stone-900 px-5 py-2.5 rounded-full font-bold text-sm transition-all"
-              >
-                <User size={18} />
-                <span>Entrar</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* MAIN CONTENT */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Estilos -->
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { font-family: ui-sans-serif, system-ui, sans-serif; }
         
-        {/* BANNER */}
-        <div className="mb-10 bg-stone-900 rounded-[2rem] p-8 md:p-12 text-white relative overflow-hidden shadow-2xl">
-          <div className="relative z-10 max-w-2xl">
-            <h2 className="text-3xl md:text-5xl font-black mb-4">
-              Arquitectura en <br/>
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400">Movimiento</span>
-            </h2>
-            <p className="text-stone-400 text-lg mb-6 font-medium">
-              Colección de Reels y Renders estáticos de Olme Cárdenas. 
-              Visualiza el video, copia el prompt y crea tu propia animación.
-            </p>
-          </div>
-          <div className="absolute top-0 right-0 h-full w-1/2 opacity-20 pointer-events-none">
-             <Video size={400} className="absolute -right-20 -top-10 text-stone-700" />
-          </div>
-        </div>
+        /* Animaciones suaves */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="bg-[#fafaf9]">
+    
+    <!-- Contenedor Principal -->
+    <div id="root"></div>
 
-        {/* CONTROLS */}
-        <div className="sticky top-20 z-40 bg-[#fafaf9]/95 backdrop-blur-sm py-4 mb-8 flex flex-col md:flex-row gap-4 justify-between items-center border-b border-stone-200 md:border-none">
-          <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 no-scrollbar">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
-                  activeCategory === cat 
-                    ? 'bg-amber-500 text-white shadow-md transform scale-105' 
-                    : 'bg-white border border-stone-200 text-stone-500 hover:border-amber-400 hover:text-amber-600'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative w-full md:w-80 group">
-            <input
-              type="text"
-              placeholder="Buscar..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 outline-none transition-all shadow-sm font-bold text-stone-700"
-            />
-            <Search className="absolute left-4 top-3.5 text-stone-300 group-focus-within:text-amber-500 transition-colors" size={20} />
-          </div>
-        </div>
-
-        {/* FEED */}
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[1,2,3].map(i => <div key={i} className="bg-white h-96 rounded-[2rem] animate-pulse border border-stone-200"></div>)}
-          </div>
-        ) : filteredPrompts.length === 0 ? (
-          <div className="text-center py-32 bg-white rounded-[2rem] border-2 border-dashed border-stone-200">
-            <div className="inline-block p-6 bg-stone-50 rounded-full mb-4">
-              <Video className="text-stone-300" size={48} />
-            </div>
-            <h3 className="text-xl font-bold text-stone-800">No hay contenido aún</h3>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-20">
-            {filteredPrompts.map((prompt) => (
-              <article key={prompt.id} className="bg-white rounded-[2.5rem] border border-stone-200 shadow-sm hover:shadow-2xl hover:shadow-stone-200/50 transition-all duration-500 hover:-translate-y-2 flex flex-col overflow-hidden group relative">
-                
-                {/* Header */}
-                <div className="px-6 py-4 border-b border-stone-50 flex justify-between items-center bg-white/50 backdrop-blur-sm z-20">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-pink-600 p-[2px]">
-                      <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
-                        <User size={14} className="text-stone-400" />
-                      </div>
+    <!-- Script de Errores Global (Para evitar pantalla blanca silenciosa) -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            const root = document.getElementById('root');
+            // Solo mostrar si el root está vacío (significa que React no cargó)
+            if (root && root.innerHTML.trim() === "") {
+                root.innerHTML = `
+                    <div style="padding: 2rem; color: #dc2626; font-family: sans-serif; text-align: center;">
+                        <h1 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 1rem;">⚠️ Error de Carga</h1>
+                        <p>La aplicación no pudo iniciarse correctamente.</p>
+                        <p style="background: #fee2e2; padding: 1rem; border-radius: 0.5rem; font-family: monospace; margin-top: 1rem;">
+                            ${message}
+                        </p>
+                        <p style="margin-top: 1rem; color: #57534e; font-size: 0.9rem;">
+                            Abre la consola del navegador (F12) para más detalles.
+                        </p>
                     </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-stone-900 leading-tight">{prompt.artist}</h4>
-                      <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wide flex items-center gap-1">
-                        {prompt.mediaType === 'video' ? <Video size={10} /> : <ImageIcon size={10} />}
-                        {prompt.mediaType === 'video' ? 'Instagram Reel' : 'Instagram Post'}
-                      </p>
+                `;
+            }
+        };
+    </script>
+
+    <script type="text/babel" data-type="module">
+        // --- 1. IMPORTS DE FIREBASE (ESM) ---
+        // Usamos imports directos para módulos ES.
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+        import { 
+            getAuth, 
+            signInWithPopup, 
+            GoogleAuthProvider,
+            signOut,
+            onAuthStateChanged
+        } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            query, 
+            onSnapshot, 
+            serverTimestamp,
+            deleteDoc,
+            doc
+        } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
+
+        // --- 2. CONFIGURACIÓN ---
+        const { useState, useEffect } = React;
+
+        // ==========================================
+        //  👇 TU CONFIGURACIÓN DE FIREBASE AQUÍ 👇
+        // ==========================================
+        const MY_FIREBASE_CONFIG = {
+            apiKey: "TU_API_KEY",
+            authDomain: "TU_PROYECTO.firebaseapp.com",
+            projectId: "TU_PROJECT_ID",
+            storageBucket: "TU_PROYECTO.appspot.com",
+            messagingSenderId: "TU_SENDER_ID",
+            appId: "TU_APP_ID"
+        };
+
+        // Lógica de inicialización segura
+        let app, auth, db;
+        let firebaseError = null;
+
+        try {
+            // Detectar entorno o usar config manual
+            let config = MY_FIREBASE_CONFIG;
+            let currentAppId = 'github-deploy-v1';
+
+            if (typeof window.__firebase_config !== 'undefined') {
+                config = JSON.parse(window.__firebase_config);
+                currentAppId = window.__app_id || 'default-app-id';
+            }
+
+            // Validar si la config es la de ejemplo
+            if (config.apiKey === "TU_API_KEY") {
+                firebaseError = "CONFIG_MISSING";
+            } else {
+                app = initializeApp(config);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            }
+        } catch (error) {
+            console.error("Error Firebase:", error);
+            firebaseError = error.message;
+        }
+
+        // --- 3. ICONOS SVG (INTEGRADOS PARA ESTABILIDAD) ---
+        const Icons = {
+            Sparkles: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>,
+            Plus: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            User: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+            LogOut: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>,
+            Video: ({size=24, className}) => <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>,
+            Search: ({size=24, className}) => <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
+            Trash2: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>,
+            ImageIcon: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
+            PlayCircle: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>,
+            Copy: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>,
+            Instagram: ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>,
+            X: ({size=24, className}) => <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        };
+
+        // --- 4. UTILIDADES ---
+        const getInstagramData = (url) => {
+            try {
+                const regex = /instagram\.com\/(p|reel)\/([a-zA-Z0-9_-]+)/;
+                const match = url.match(regex);
+                if (match) return { type: match[1] === 'reel' ? 'video' : 'image', id: match[2] };
+                return null;
+            } catch (e) { return null; }
+        };
+
+        // --- 5. COMPONENTE APP ---
+        function App() {
+            const [user, setUser] = useState(null);
+            const [prompts, setPrompts] = useState([]);
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [promptText, setPromptText] = useState('');
+            const [instaUrl, setInstaUrl] = useState('');
+            const [category, setCategory] = useState('Arquitectura');
+            const [style, setStyle] = useState('Fotorealista');
+            const [artistName, setArtistName] = useState('Olme Cárdenas');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [activeCategory, setActiveCategory] = useState('Todos');
+
+            // Efecto de inicialización
+            useEffect(() => {
+                if (!auth) {
+                    setLoading(false); // Deja de cargar si no hay firebase
+                    return;
+                }
+
+                const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+
+                // Escuchar datos
+                try {
+                    const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'github-deploy-v1';
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2'));
+                    
+                    const unsubData = onSnapshot(q, (snapshot) => {
+                        const loaded = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        loaded.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                        setPrompts(loaded);
+                        setLoading(false);
+                    }, (err) => {
+                        console.error("Error lectura:", err);
+                        setLoading(false);
+                    });
+                    
+                    return () => { unsubscribe(); unsubData(); }
+                } catch(e) {
+                    console.error("Error setting up listeners", e);
+                    setLoading(false);
+                }
+            }, []);
+
+            const handleLogin = async () => {
+                if (!auth) return alert("Firebase no configurado.");
+                try { await signInWithPopup(auth, new GoogleAuthProvider()); } 
+                catch (error) { alert("Error login: " + error.message); }
+            };
+
+            const handlePublish = async (e) => {
+                e.preventDefault();
+                if (!auth) return alert("Firebase no configurado.");
+                if (!promptText || !instaUrl || !user) return;
+                const instaData = getInstagramData(instaUrl);
+                if (!instaData) return alert("Link de Instagram inválido");
+
+                setIsSubmitting(true);
+                try {
+                    const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'github-deploy-v1';
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2'), {
+                        text: promptText,
+                        instagramId: instaData.id,
+                        mediaType: instaData.type,
+                        originalUrl: instaUrl,
+                        category, style,
+                        artist: artistName || user.displayName || 'Anónimo',
+                        authorUid: user.uid,
+                        createdAt: serverTimestamp(),
+                    });
+                    setPromptText(''); setInstaUrl(''); setIsModalOpen(false);
+                } catch (error) {
+                    alert("Error al publicar: " + error.message);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            const handleDelete = async (docId) => {
+                if (!confirm("¿Borrar?") || !auth) return;
+                try {
+                    const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'github-deploy-v1';
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'instagram_hub_v2', docId));
+                } catch (e) { alert("No puedes borrar esto."); }
+            };
+
+            const copyToClipboard = (text, id) => {
+                const ta = document.createElement("textarea");
+                ta.value = text; document.body.appendChild(ta); ta.select();
+                try {
+                    document.execCommand('copy');
+                    const btn = document.getElementById(`copy-btn-${id}`);
+                    if(btn) {
+                        const old = btn.innerHTML;
+                        btn.innerHTML = "¡Copiado!";
+                        btn.className = btn.className.replace("bg-stone-900", "bg-green-600");
+                        setTimeout(() => {
+                            btn.innerHTML = old;
+                            btn.className = btn.className.replace("bg-green-600", "bg-stone-900");
+                        }, 2000);
+                    }
+                } catch(e) {}
+                document.body.removeChild(ta);
+            };
+
+            const categories = ['Todos', 'Arquitectura', 'Video/Reel', 'Interiorismo', 'Paisajismo', 'Animación 3D'];
+            const filteredPrompts = prompts.filter(p => {
+                const matchS = p.text.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                               p.artist.toLowerCase().includes(searchTerm.toLowerCase());
+                const matchC = activeCategory === 'Todos' || p.category === activeCategory;
+                return matchS && matchC;
+            });
+
+            // --- PANTALLA DE ERROR DE CONFIGURACIÓN ---
+            if (firebaseError === "CONFIG_MISSING") {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4">
+                        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border-l-4 border-amber-500">
+                            <Icons.Sparkles size={48} className="mx-auto text-amber-500 mb-4" />
+                            <h1 className="text-2xl font-bold text-stone-800 mb-2">¡Casi listo!</h1>
+                            <p className="text-stone-600 mb-4">
+                                Para que la app funcione, necesitas abrir el archivo <code>index.html</code> y pegar tus claves de Firebase.
+                            </p>
+                            <div className="bg-stone-100 p-3 rounded text-xs text-left font-mono text-stone-500 overflow-x-auto">
+                                const MY_FIREBASE_CONFIG = &#123;<br/>
+                                &nbsp;&nbsp;apiKey: "PEGA_AQUI",<br/>
+                                &nbsp;&nbsp;...<br/>
+                                &#125;;
+                            </div>
+                        </div>
                     </div>
-                  </div>
-                  
-                  {user && user.uid === prompt.authorUid && (
-                    <button onClick={() => handleDelete(prompt.id)} className="text-stone-300 hover:text-red-500 transition-colors">
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-[#fafaf9] text-stone-800 font-sans pb-10 animate-fade-in">
+                    {/* Header */}
+                    <header className="bg-white/80 backdrop-blur-md border-b border-stone-200 sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-gradient-to-tr from-purple-500 to-orange-500 p-2.5 rounded-xl text-white shadow-lg">
+                                    <Icons.Sparkles size={22} />
+                                </div>
+                                <h1 className="text-xl font-black text-stone-900">PromptVerse</h1>
+                            </div>
+                            <div className="flex gap-4">
+                                {user ? (
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-stone-900 text-white px-5 py-2.5 rounded-full font-bold text-sm hover:scale-105 transition-transform">
+                                            <Icons.Plus size={18} /> <span className="hidden md:inline">Subir</span>
+                                        </button>
+                                        <img src={user.photoURL} alt="User" className="w-10 h-10 rounded-full border-2 border-stone-200" title="Cerrar sesión" onClick={() => auth.signOut()} />
+                                    </div>
+                                ) : (
+                                    <button onClick={handleLogin} className="flex items-center gap-2 bg-white border-2 border-stone-200 px-5 py-2.5 rounded-full font-bold text-sm hover:bg-stone-50">
+                                        <Icons.User size={18} /> <span>Entrar</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main */}
+                    <main className="max-w-7xl mx-auto px-4 py-8">
+                        <div className="mb-10 bg-stone-900 rounded-[2rem] p-8 md:p-12 text-white relative overflow-hidden shadow-2xl">
+                            <div className="relative z-10 max-w-2xl">
+                                <h2 className="text-3xl md:text-5xl font-black mb-4">Arquitectura en <br/><span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400">Movimiento</span></h2>
+                                <p className="text-stone-400">Visualiza el video, copia el prompt y crea tu propia animación.</p>
+                            </div>
+                            <div className="absolute top-0 right-0 h-full w-1/2 opacity-20 pointer-events-none flex items-center justify-center">
+                                <Icons.Video size={300} className="text-stone-700 opacity-50" />
+                            </div>
+                        </div>
+
+                        {/* Filtros */}
+                        <div className="sticky top-20 z-40 bg-[#fafaf9]/95 backdrop-blur-sm py-4 mb-8 flex flex-col md:flex-row gap-4 justify-between items-center">
+                            <div className="flex gap-2 overflow-x-auto w-full md:w-auto no-scrollbar pb-2">
+                                {categories.map(cat => (
+                                    <button key={cat} onClick={() => setActiveCategory(cat)} 
+                                        className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${activeCategory === cat ? 'bg-amber-500 text-white shadow-md scale-105' : 'bg-white border border-stone-200 text-stone-500'}`}>
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="relative w-full md:w-80">
+                                <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} 
+                                    className="w-full pl-11 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-amber-500/50 outline-none font-bold text-stone-700" />
+                                <Icons.Search className="absolute left-4 top-3.5 text-stone-300" size={20} />
+                            </div>
+                        </div>
+
+                        {/* Grid */}
+                        {loading ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                {[1,2,3].map(i => <div key={i} className="bg-white h-96 rounded-[2rem] animate-pulse border border-stone-200"></div>)}
+                            </div>
+                        ) : filteredPrompts.length === 0 ? (
+                            <div className="text-center py-32 bg-white rounded-[2rem] border-2 border-dashed border-stone-200">
+                                <h3 className="text-xl font-bold text-stone-800">No hay contenido aún</h3>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                {filteredPrompts.map((prompt) => (
+                                    <article key={prompt.id} className="bg-white rounded-[2.5rem] border border-stone-200 shadow-sm hover:shadow-2xl transition-all hover:-translate-y-2 flex flex-col overflow-hidden">
+                                        <div className="px-6 py-4 border-b border-stone-50 flex justify-between items-center bg-white/50">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-pink-600 p-[2px]">
+                                                    <div className="w-full h-full rounded-full bg-white flex items-center justify-center"><Icons.User size={14} className="text-stone-400"/></div>
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-stone-900">{prompt.artist}</h4>
+                                                    <p className="text-[10px] font-bold text-stone-400 uppercase flex items-center gap-1">
+                                                        {prompt.mediaType === 'video' ? <Icons.Video size={10}/> : <Icons.ImageIcon size={10}/>} {prompt.mediaType === 'video' ? 'Reel' : 'Post'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {user && user.uid === prompt.authorUid && (
+                                                <button onClick={() => handleDelete(prompt.id)} className="text-stone-300 hover:text-red-500"><Icons.Trash2 size={16}/></button>
+                                            )}
+                                        </div>
+
+                                        <div className={`relative w-full bg-stone-100 overflow-hidden ${prompt.mediaType === 'video' ? 'aspect-[9/16]' : 'aspect-square'}`}>
+                                            <iframe src={`https://www.instagram.com/p/${prompt.instagramId}/embed/captioned/?cr=1&v=14&wp=540`} className="w-full h-full border-none" scrolling="no" allowtransparency="true"></iframe>
+                                        </div>
+
+                                        <div className="p-6 flex flex-col flex-grow">
+                                            <div className="flex flex-wrap gap-2 mb-4">
+                                                <span className="px-3 py-1 bg-amber-100 text-amber-800 text-[10px] font-black uppercase rounded-lg">{prompt.category}</span>
+                                            </div>
+                                            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100 mb-4 flex-grow">
+                                                <p className="text-stone-800 text-sm font-medium font-mono">"{prompt.text}"</p>
+                                            </div>
+                                            <div className="flex gap-3">
+                                                <button id={`copy-btn-${prompt.id}`} onClick={() => copyToClipboard(prompt.text, prompt.id)} className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-stone-900 hover:bg-amber-500 text-white text-xs font-bold rounded-xl transition-all">
+                                                    <Icons.Copy size={16}/> <span>Copiar</span>
+                                                </button>
+                                                <a href={prompt.originalUrl} target="_blank" className="px-4 py-3 bg-white border border-stone-200 text-stone-400 hover:text-[#E1306C] rounded-xl"><Icons.Instagram size={20}/></a>
+                                            </div>
+                                        </div>
+                                    </article>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Modal */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-md">
+                            <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg p-8 animate-fade-in relative">
+                                <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-stone-400 hover:text-stone-800"><Icons.X size={24}/></button>
+                                <h2 className="text-xl font-black text-stone-900 mb-6 flex items-center gap-2"><Icons.Plus size={24} className="text-amber-500"/> Publicar</h2>
+                                <form onSubmit={handlePublish} className="space-y-4">
+                                    <input type="url" required placeholder="Enlace Instagram (Reel/Post)" value={instaUrl} onChange={e => setInstaUrl(e.target.value)} className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-amber-500 outline-none font-bold text-stone-700"/>
+                                    <textarea required rows={4} placeholder="Prompt..." value={promptText} onChange={e => setPromptText(e.target.value)} className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-amber-500 outline-none font-mono text-sm resize-none"></textarea>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <select value={category} onChange={e => setCategory(e.target.value)} className="w-full p-3 bg-stone-50 border-2 border-stone-100 rounded-xl font-bold text-stone-600 text-sm">
+                                            {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <input type="text" value={artistName} onChange={e => setArtistName(e.target.value)} className="w-full p-3 bg-stone-50 border-2 border-stone-100 rounded-xl font-bold text-stone-600 text-sm"/>
+                                    </div>
+                                    <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-stone-900 hover:bg-amber-500 text-white font-black text-lg rounded-2xl shadow-xl transition-all disabled:opacity-50">
+                                        {isSubmitting ? 'Publicando...' : 'Publicar Ahora'}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
                 </div>
+            );
+        }
 
-                {/* Media Container (Iframe) */}
-                <div className={`relative w-full bg-stone-100 group z-10 overflow-hidden ${prompt.mediaType === 'video' ? 'aspect-[9/16]' : 'aspect-square'}`}>
-                   <iframe 
-                    src={`https://www.instagram.com/p/${prompt.instagramId}/embed/captioned/?cr=1&v=14&wp=540&rd=http%3A%2F%2Flocalhost%3A3000&rp=%2F`} 
-                    className="w-full h-full border-none"
-                    scrolling="no" 
-                    allowtransparency="true"
-                    allow="encrypted-media"
-                    title="Instagram Embed"
-                   ></iframe>
-                   
-                   {/* Badge Overlay */}
-                   {prompt.mediaType === 'video' && (
-                     <div className="absolute top-4 right-4 bg-black/50 backdrop-blur-md text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 pointer-events-none">
-                       <PlayCircle size={12} /> Video
-                     </div>
-                   )}
-                </div>
-
-                {/* Prompt Data */}
-                <div className="p-6 flex flex-col flex-grow bg-white z-20">
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <span className="px-3 py-1 bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-wide rounded-lg">
-                      {prompt.category}
-                    </span>
-                    <span className="px-3 py-1 bg-stone-100 text-stone-600 text-[10px] font-black uppercase tracking-wide rounded-lg">
-                      {prompt.style}
-                    </span>
-                  </div>
-
-                  <div className="flex-grow">
-                    <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100 relative group-hover:border-amber-200 transition-colors">
-                      <div className="absolute -top-3 left-4 bg-white px-2 text-[10px] font-black text-stone-400 uppercase tracking-widest border border-stone-100 rounded-md">
-                        Prompt
-                      </div>
-                      <p className="text-stone-800 text-sm font-medium leading-relaxed font-mono mt-1">
-                        "{prompt.text}"
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex gap-3">
-                    <button 
-                      id={`copy-btn-${prompt.id}`}
-                      onClick={() => copyToClipboard(prompt.text, prompt.id)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-stone-900 hover:bg-amber-500 hover:text-stone-900 text-white text-xs font-bold rounded-xl transition-all active:scale-95 shadow-lg"
-                    >
-                      <Copy size={16} />
-                      <span>Copiar Prompt</span>
-                    </button>
-                    <a 
-                      href={prompt.originalUrl} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="px-4 py-3 bg-white border border-stone-200 hover:border-[#E1306C] text-stone-400 hover:text-[#E1306C] rounded-xl transition-colors shadow-sm"
-                    >
-                      <Instagram size={20} />
-                    </a>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </main>
-
-      {/* MODAL */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-md">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="px-8 py-6 border-b border-stone-100 flex justify-between items-center bg-stone-50">
-              <h2 className="text-xl font-black text-stone-900 flex items-center gap-2">
-                <Plus size={24} className="text-amber-500" /> Publicar Contenido
-              </h2>
-              <button onClick={() => setIsModalOpen(false)}><X size={24} className="text-stone-400 hover:text-stone-800" /></button>
-            </div>
-
-            <form onSubmit={handlePublish} className="p-8 space-y-6">
-              <div className="space-y-2">
-                <label className="text-xs font-black text-stone-400 uppercase tracking-wide ml-1">Enlace (Post o Reel)</label>
-                <div className="relative">
-                  <input 
-                    type="url" required
-                    placeholder="https://www.instagram.com/reel/Cx..." 
-                    value={instaUrl}
-                    onChange={(e) => setInstaUrl(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-amber-500 focus:bg-white outline-none font-bold text-stone-700"
-                  />
-                  <div className="absolute left-4 top-4 text-[#E1306C]"><Instagram size={20}/></div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-black text-stone-400 uppercase tracking-wide ml-1">Prompt Utilizado</label>
-                <textarea 
-                  required rows={4}
-                  placeholder="Escribe el prompt..." 
-                  value={promptText}
-                  onChange={(e) => setPromptText(e.target.value)}
-                  className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-amber-500 focus:bg-white outline-none font-mono text-sm resize-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-stone-400 uppercase tracking-wide ml-1">Categoría</label>
-                  <select 
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-3 bg-stone-50 border-2 border-stone-100 rounded-xl focus:border-amber-500 outline-none text-sm font-bold text-stone-600"
-                  >
-                    {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-stone-400 uppercase tracking-wide ml-1">Nombre Artista</label>
-                  <input 
-                    type="text" 
-                    value={artistName}
-                    onChange={(e) => setArtistName(e.target.value)}
-                    className="w-full p-3 bg-stone-50 border-2 border-stone-100 rounded-xl focus:border-amber-500 outline-none text-sm font-bold text-stone-600"
-                  />
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-4 bg-stone-900 hover:bg-amber-500 hover:text-stone-900 text-white font-black text-lg rounded-2xl transition-all shadow-xl disabled:opacity-50"
-              >
-                {isSubmitting ? 'Publicando...' : 'Publicar Ahora'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
